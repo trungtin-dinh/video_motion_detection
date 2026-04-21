@@ -1,5 +1,3 @@
----
-
 ## Table des matières
 
 1. [Problème posé et contexte](#1-problème-posé-et-contexte)

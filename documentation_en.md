@@ -1,5 +1,3 @@
----
-
 ## Table of Contents
 
 1. [Problem Statement and Context](#1-problem-statement-and-context)

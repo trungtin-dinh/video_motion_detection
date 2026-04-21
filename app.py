@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from typing import Optional, Tuple
 
@@ -11,8 +12,50 @@ LATEX_DELIMITERS = [
     {"left": "$", "right": "$", "display": False},
 ]
 
-DOCUMENTATION_fr = open("documentation_fr.md").read()
-DOCUMENTATION_en = open("documentation_en.md").read()
+#DOCUMENTATION_fr = open("documentation_fr.md").read()
+#DOCUMENTATION_en = open("documentation_en.md").read()
+
+with open("documentation_fr.md", "r", encoding="utf-8") as f:
+    DOCUMENTATION_fr = f.read()
+
+with open("documentation_en.md", "r", encoding="utf-8") as f:
+    DOCUMENTATION_en = f.read()
+
+
+def split_markdown_by_h2(markdown_text: str) -> dict[str, str]:
+    sections = {}
+    parts = re.split(r"(?m)^##\s+", markdown_text.strip())
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        lines = part.splitlines()
+        title = lines[0].strip()
+
+        if title.lower() in {"table des matières", "table of contents"}:
+            continue
+
+        sections[title] = "## " + part
+
+    return sections
+
+
+DOC_FR_SECTIONS = split_markdown_by_h2(DOCUMENTATION_fr)
+DOC_EN_SECTIONS = split_markdown_by_h2(DOCUMENTATION_en)
+
+DOC_FR_TITLES = list(DOC_FR_SECTIONS.keys())
+DOC_EN_TITLES = list(DOC_EN_SECTIONS.keys())
+
+
+def load_doc_fr_section(title: str) -> str:
+    return DOC_FR_SECTIONS[title]
+
+
+def load_doc_en_section(title: str) -> str:
+    return DOC_EN_SECTIONS[title]
+
 
 DEFAULT_VIDEO_URL = "https://videos.pexels.com/video-files/6077402/6077402-uhd_4096_2160_25fps.mp4"
 
@@ -455,10 +498,46 @@ with gr.Blocks(title="Video Motion Detection") as demo:
         )
 
     with gr.Tab("Documentation FR"):
-        gr.Markdown(DOCUMENTATION_fr, latex_delimiters=LATEX_DELIMITERS)
+        with gr.Row():
+            with gr.Column(scale=1):
+                doc_fr_buttons = []
+                for title in DOC_FR_TITLES:
+                    btn = gr.Button(title)
+                    doc_fr_buttons.append((btn, title))
+
+            with gr.Column(scale=3):
+                doc_fr_view = gr.Markdown(
+                    value=load_doc_fr_section(DOC_FR_TITLES[0]),
+                    latex_delimiters=LATEX_DELIMITERS
+                )
+
+        for btn, title in doc_fr_buttons:
+            btn.click(
+                lambda t=title: load_doc_fr_section(t),
+                inputs=None,
+                outputs=doc_fr_view,
+            )
 
     with gr.Tab("Documentation EN"):
-        gr.Markdown(DOCUMENTATION_en, latex_delimiters=LATEX_DELIMITERS)
+        with gr.Row():
+            with gr.Column(scale=1):
+                doc_en_buttons = []
+                for title in DOC_EN_TITLES:
+                    btn = gr.Button(title)
+                    doc_en_buttons.append((btn, title))
+
+            with gr.Column(scale=3):
+                doc_en_view = gr.Markdown(
+                    value=load_doc_en_section(DOC_EN_TITLES[0]),
+                    latex_delimiters=LATEX_DELIMITERS
+                )
+
+        for btn, title in doc_en_buttons:
+            btn.click(
+                lambda t=title: load_doc_en_section(t),
+                inputs=None,
+                outputs=doc_en_view,
+            )
 
 if __name__ == "__main__":
     demo.launch()
