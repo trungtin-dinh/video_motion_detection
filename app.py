@@ -6,6 +6,13 @@ import cv2
 import gradio as gr
 import numpy as np
 
+LATEX_DELIMITERS = [
+    {"left": "$$", "right": "$$", "display": True},
+    {"left": "$", "right": "$", "display": False},
+]
+
+DOCUMENTATION_fr = open("documentation_fr.md").read()
+DOCUMENTATION_en = open("documentation_en.md").read()
 
 DEFAULT_VIDEO_URL = "https://videos.pexels.com/video-files/6077402/6077402-uhd_4096_2160_25fps.mp4"
 
@@ -346,108 +353,112 @@ def run_wrapper(
         max_frames=max_frames,
     )
 
-
-with gr.Blocks(title="Motion Detection from Video") as demo:
-    with gr.Row():
-        with gr.Column(scale=1):
-            input_video = gr.Video(
-                label="Input video",
-                value=DEFAULT_VIDEO_URL,
-                sources=["upload"],
-                height=360,
-            )
-
-            with gr.Accordion("Settings", open=True):
-                method = gr.Dropdown(
-                    choices=["MOG2", "KNN", "Frame Difference", "Running Average"],
-                    value="MOG2",
-                    label="Method",
+with gr.Blocks(title="Video Motion Detection") as demo:
+    with gr.Tab("App"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                input_video = gr.Video(
+                    label="Input video",
+                    value=DEFAULT_VIDEO_URL,
+                    sources=["upload"],
+                    height=360,
                 )
 
-                with gr.Group(visible=True) as mog2_group:
+                with gr.Accordion("Settings", open=True):
+                    method = gr.Dropdown(
+                        choices=["MOG2", "KNN", "Frame Difference", "Running Average"],
+                        value="MOG2",
+                        label="Method",
+                    )
+
+                    with gr.Group(visible=True) as mog2_group:
+                        with gr.Row():
+                            with gr.Column():
+                                history_mog2 = gr.Slider(1, 10000, value=150, step=1, label="History")
+                                mog2_var_threshold = gr.Slider(1, 10000, value=16, step=1, label="MOG2 variance threshold")
+                            with gr.Column():
+                                mog2_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
+                                mog2_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
+
+                    with gr.Group(visible=False) as knn_group:
+                        with gr.Row():
+                            with gr.Column():
+                                history_knn = gr.Slider(1, 10000, value=150, step=1, label="History")
+                                knn_dist2_threshold = gr.Slider(1, 10000, value=400, step=1, label="KNN distance threshold")
+                            with gr.Column():
+                                knn_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
+                                knn_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
+
+                    with gr.Group(visible=False) as frame_diff_group:
+                        with gr.Row():
+                            with gr.Column():
+                                frame_diff_threshold = gr.Slider(1, 255, value=30, step=1, label="Difference threshold")
+                            with gr.Column():
+                                gr.Markdown("")
+
+                    with gr.Group(visible=False) as running_avg_group:
+                        with gr.Row():
+                            with gr.Column():
+                                running_avg_learning_rate = gr.Slider(0.0001, 1.0, value=0.02, step=0.0001, label="Learning rate")
+                                running_avg_threshold = gr.Slider(1, 255, value=30, step=1, label="Difference threshold")
+                            with gr.Column():
+                                gr.Markdown("")
+
                     with gr.Row():
                         with gr.Column():
-                            history_mog2 = gr.Slider(1, 10000, value=150, step=1, label="History")
-                            mog2_var_threshold = gr.Slider(1, 10000, value=16, step=1, label="MOG2 variance threshold")
+                            blur_kernel = gr.Slider(1, 101, value=5, step=1, label="Blur kernel size")
+                            open_kernel = gr.Slider(1, 101, value=3, step=1, label="Opening kernel size")
+                            close_kernel = gr.Slider(1, 101, value=7, step=1, label="Closing kernel size")
                         with gr.Column():
-                            mog2_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
-                            mog2_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
+                            min_area = gr.Slider(1, 10000, value=400, step=1, label="Minimum object area")
+                            max_dimension = gr.Slider(64, 10000, value=720, step=1, label="Maximum output dimension")
+                            contour_thickness = gr.Slider(1, 100, value=2, step=1, label="Box thickness")
+                            max_frames = gr.Slider(1, 10000, value=10000, step=1, label="Max frames to process")
 
-                with gr.Group(visible=False) as knn_group:
-                    with gr.Row():
-                        with gr.Column():
-                            history_knn = gr.Slider(1, 10000, value=150, step=1, label="History")
-                            knn_dist2_threshold = gr.Slider(1, 10000, value=400, step=1, label="KNN distance threshold")
-                        with gr.Column():
-                            knn_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
-                            knn_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
+                run_button = gr.Button("Process", variant="primary")
 
-                with gr.Group(visible=False) as frame_diff_group:
-                    with gr.Row():
-                        with gr.Column():
-                            frame_diff_threshold = gr.Slider(1, 255, value=30, step=1, label="Difference threshold")
-                        with gr.Column():
-                            gr.Markdown("")
+            with gr.Column(scale=1):
+                mask_video = gr.Video(label="Foreground mask video", height=360)
+                overlay_video = gr.Video(label="Detected motion video", height=360)
 
-                with gr.Group(visible=False) as running_avg_group:
-                    with gr.Row():
-                        with gr.Column():
-                            running_avg_learning_rate = gr.Slider(0.0001, 1.0, value=0.02, step=0.0001, label="Learning rate")
-                            running_avg_threshold = gr.Slider(1, 255, value=30, step=1, label="Difference threshold")
-                        with gr.Column():
-                            gr.Markdown("")
+        method.change(
+            fn=update_method_visibility,
+            inputs=method,
+            outputs=[mog2_group, knn_group, frame_diff_group, running_avg_group],
+        )
 
-                with gr.Row():
-                    with gr.Column():
-                        blur_kernel = gr.Slider(1, 101, value=5, step=1, label="Blur kernel size")
-                        open_kernel = gr.Slider(1, 101, value=3, step=1, label="Opening kernel size")
-                        close_kernel = gr.Slider(1, 101, value=7, step=1, label="Closing kernel size")
-                    with gr.Column():
-                        min_area = gr.Slider(1, 10000, value=400, step=1, label="Minimum object area")
-                        max_dimension = gr.Slider(64, 10000, value=720, step=1, label="Maximum output dimension")
-                        contour_thickness = gr.Slider(1, 100, value=2, step=1, label="Box thickness")
-                        max_frames = gr.Slider(1, 10000, value=10000, step=1, label="Max frames to process")
+        run_button.click(
+            fn=run_wrapper,
+            inputs=[
+                input_video,
+                method,
+                history_mog2,
+                mog2_var_threshold,
+                mog2_detect_shadows,
+                mog2_learning_rate,
+                history_knn,
+                knn_dist2_threshold,
+                knn_detect_shadows,
+                knn_learning_rate,
+                frame_diff_threshold,
+                running_avg_learning_rate,
+                running_avg_threshold,
+                blur_kernel,
+                open_kernel,
+                close_kernel,
+                min_area,
+                max_dimension,
+                contour_thickness,
+                max_frames,
+            ],
+            outputs=[mask_video, overlay_video],
+        )
 
-            run_button = gr.Button("Process", variant="primary")
+    with gr.Tab("Documentation FR"):
+        gr.Markdown(DOCUMENTATION_fr, latex_delimiters=LATEX_DELIMITERS)
 
-        with gr.Column(scale=1):
-            mask_video = gr.Video(label="Foreground mask video", height=360)
-            overlay_video = gr.Video(label="Detected motion video", height=360)
-
-    method.change(
-        fn=update_method_visibility,
-        inputs=method,
-        outputs=[mog2_group, knn_group, frame_diff_group, running_avg_group],
-    )
-
-    run_button.click(
-        fn=run_wrapper,
-        inputs=[
-            input_video,
-            method,
-            history_mog2,
-            mog2_var_threshold,
-            mog2_detect_shadows,
-            mog2_learning_rate,
-            history_knn,
-            knn_dist2_threshold,
-            knn_detect_shadows,
-            knn_learning_rate,
-            frame_diff_threshold,
-            running_avg_learning_rate,
-            running_avg_threshold,
-            blur_kernel,
-            open_kernel,
-            close_kernel,
-            min_area,
-            max_dimension,
-            contour_thickness,
-            max_frames,
-        ],
-        outputs=[mask_video, overlay_video],
-    )
-
-demo.queue()
+    with gr.Tab("Documentation EN"):
+        gr.Markdown(DOCUMENTATION_en, latex_delimiters=LATEX_DELIMITERS)
 
 if __name__ == "__main__":
     demo.launch()
