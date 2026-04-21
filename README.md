@@ -1,6 +1,6 @@
 ---
 title: Video Motion Detection
-emoji: 👀
+emoji: 🏃
 colorFrom: green
 colorTo: purple
 sdk: gradio
