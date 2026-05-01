@@ -681,6 +681,10 @@ def render_app_tab() -> None:
         show_status()
 
 
+def select_documentation_section(state_key: str, title: str) -> None:
+    st.session_state[state_key] = title
+
+
 def render_documentation_tab(sections: dict[str, str], state_key: str) -> None:
     titles = list(sections.keys())
     if not titles:
@@ -693,13 +697,20 @@ def render_documentation_tab(sections: dict[str, str], state_key: str) -> None:
     button_col, markdown_col = st.columns([1, 2])
 
     with button_col:
-        for title in titles:
+        for index, title in enumerate(titles):
             button_type = "primary" if st.session_state[state_key] == title else "secondary"
-            if st.button(title, key=f"{state_key}_{title}", type=button_type, width="stretch"):
-                st.session_state[state_key] = title
+            st.button(
+                title,
+                key=f"{state_key}_{index}",
+                type=button_type,
+                width="stretch",
+                on_click=select_documentation_section,
+                args=(state_key, title),
+            )
 
+    selected_title = st.session_state[state_key]
     with markdown_col:
-        st.markdown(sections[st.session_state[state_key]], unsafe_allow_html=False)
+        st.markdown(sections[selected_title], unsafe_allow_html=False)
 
 
 def main() -> None:
