@@ -35,17 +35,17 @@ The four methods implemented in this app span a progression from the simplest po
 
 All four methods operate on **single-channel intensity images**. Each colour frame $I_t$ is converted to a grayscale image $G_t : \Omega \to [0, 255]$ using the ITU-R BT.601 luminance formula:
 
-$$G_t(x,y) = 0.299 \cdot R(x,y) + 0.587 \cdot V(x,y) + 0.114 \cdot B(x,y)$$
+$$G_t(x,y) = 0.299 \cdot r(x,y) + 0.587 \cdot g(x,y) + 0.114 \cdot b(x,y)$$
 
-where $R$, $V$, $B$ are the red, green, and blue channel values respectively. The coefficients reflect the non-uniform sensitivity of human vision to each primary colour, green being the dominant perceptual contributor.
+where $r$, $g$, $b$ are the red, green, and blue channel values respectively. The coefficients reflect the non-uniform sensitivity of human vision to each primary colour, green being the dominant perceptual contributor.
 
 Working in grayscale reduces computational cost by a factor of 3 and is sufficient because motion manifests primarily as a change in *intensity*, not hue.
 
 ### 2.2 Gaussian Blur
 
-Before any differencing operation is applied, each grayscale frame is convolved with a **Gaussian kernel** to suppress high-frequency noise:
+Before any further operation, each BGR frame is convolved with a **Gaussian kernel** to suppress high-frequency noise:
 
-$$\tilde{G}_t = G_t * h_\sigma$$
+$$\tilde{I}_t = I_t * h_\sigma$$
 
 where the 2D Gaussian kernel is:
 
@@ -55,7 +55,7 @@ In practice, a discrete kernel of size $(k \times k)$ is used, with $k$ odd and 
 
 **Why blur?** Sensor noise and compression artefacts introduce isolated pixels that flicker between frames. Without blurring, these would produce thousands of false positive foreground detections. Blurring trades a small amount of spatial resolution for dramatically improved signal-to-noise ratio on the difference image.
 
-> **Important**: the Gaussian blur is applied **only in the Frame Difference and Running Average methods**, where pixel-level differences are computed manually. The MOG2 and KNN subtractors perform their own internal statistical noise handling, so blur is applied to the frame before passing it to these methods as well, providing consistent preprocessing across all modes.
+> **Note**: the Gaussian blur is applied uniformly across all four methods as a first preprocessing step. The blurred BGR frame is produced first; grayscale conversion is then applied to this smoothed result. For Frame Difference and Running Average, blurring suppresses inter-frame pixel flickering before the differencing operation. For MOG2 and KNN, the blurred frame is passed directly to the background subtractor, providing consistent denoising regardless of the detection strategy.
 
 ---
 
@@ -168,7 +168,7 @@ $$\sigma_{k^*,t}^2 \leftarrow (1 - \rho)\, \sigma_{k^*,t}^2 + \rho\, (x_t - \mu_
 
 where $\rho = \alpha \cdot \mathcal{N}(x_t; \mu_{k^*}, \sigma_{k^*}^2)$ is a per-component learning rate scaled by how well the observation fits the component. All other weights are decreased: $w_{k \neq k^*} \leftarrow (1-\alpha)\, w_{k}$. If no component matches, the least probable component is replaced with a new one initialised at $x_t$.
 
-The **learning rate** $\alpha$ is equivalent to $1/H$ where $H$ is the **history** parameter: it controls how many past frames effectively contribute to the model. A history of 150 means the model has a temporal memory of roughly 150 frames.
+The **learning rate** $\alpha$ controls the speed of adaptation. When set manually to a positive value, it overrides the automatic rate $1/H$ that OpenCV would otherwise derive from the **history** parameter $H$. A history of 150 means the model has a temporal memory of roughly 150 frames when operating in automatic mode.
 
 ### 6.4 Advantages of MOG2
 
@@ -196,7 +196,7 @@ The **KNN distance threshold** $d^2$ is the squared Euclidean distance in intens
 | Multi-modal support | Yes ($K$ components) | Yes (implicitly, via diverse samples) |
 | Complexity per pixel | $O(K)$ | $O(N)$ |
 | Adapts to new distributions | Gradually via weight update | Immediately when sample is replaced |
-| Main parameter | Variance threshold | Distance threshold $d^2$ |
+| Main parameter | Variance threshold $\lambda$ | Distance threshold $d^2$ |
 
 KNN tends to outperform MOG2 in scenes with very complex, non-Gaussian background dynamics (e.g., water surfaces, flames, screens) because it makes no distributional assumptions. MOG2 is generally faster for small $K$ and can be more numerically stable.
 
@@ -214,9 +214,9 @@ Both MOG2 and KNN include an optional **shadow detection** step, activated by th
 
 Shadow detection uses a simple but effective colour model (Prati et al., 2003). A pixel $(x,y)$ is classified as a **shadow** (rather than foreground) if:
 
-$$\alpha_{shadow} \leq \frac{I_t(x,y)}{B_t(x,y)} \leq \beta_{shadow} \qquad \text{and} \qquad \left|\arg(I_t) - \arg(B_t)\right| < \tau_{hue}$$
+$$\alpha_{s} \leq \frac{I_t(x,y)}{B_t(x,y)} \leq \beta_{s} \qquad \text{and} \qquad \left|\arg(I_t) - \arg(B_t)\right| < \tau_{h}$$
 
-where $\alpha_{shadow}$ and $\beta_{shadow}$ bound the acceptable ratio of current intensity to background intensity (a shadow darkens but does not dramatically change colour), and the angular difference in the hue channel must be small. In the HSV colour space, a shadow mainly reduces the $V$ (value) channel while leaving $H$ (hue) largely unchanged.
+where $\alpha_{s}$ and $\beta_{s}$ bound the acceptable ratio of current intensity to background intensity (a shadow darkens but does not dramatically change colour), and the angular difference in the hue channel must be small. In the HSV colour space, a shadow mainly reduces the $V$ (value) channel while leaving $H$ (hue) largely unchanged.
 
 ### 8.2 Output Encoding
 
@@ -225,7 +225,7 @@ When shadow detection is active, the raw mask returned by the subtractor uses a 
 - $127$: shadow
 - $255$: foreground
 
-After the subtractor, a threshold is applied at value 200 to binarize the mask, thereby discarding shadow pixels (127) and keeping only true foreground (255). When shadow detection is disabled, the threshold is set to 1 (any non-zero value is foreground).
+After the subtractor, a threshold is applied at value 200 to binarise the mask, thereby discarding shadow pixels (127) and keeping only true foreground (255). When shadow detection is disabled, the threshold is set to 1 (any non-zero value is foreground).
 
 ---
 
@@ -291,11 +291,11 @@ The algorithm (Suzuki, 1985) assigns a unique integer label $\ell$ to each conne
 
 ### 10.2 Area Filtering
 
-Each component is retained only if its area exceeds the **minimum object area** threshold $A_{min}$:
+Each component is retained only if its area exceeds the **minimum object area** threshold $A_{\min}$:
 
-$$M_t^{\text{filtered}}(x,y) = \mathbf{1}\!\left[\ell(x,y) \neq 0 \;\wedge\; A_{\ell(x,y)} \geq A_{min}\right]$$
+$$M_t^{\text{filtered}}(x,y) = \mathbf{1}\!\left[\ell(x,y) \neq 0 \;\wedge\; A_{\ell(x,y)} \geq A_{\min}\right]$$
 
-This step eliminates spurious small blobs that survived morphological opening. Setting $A_{min}$ appropriately requires knowing the expected minimum size of objects of interest in pixels, which depends on the resolution and the distance of objects from the camera.
+This step eliminates spurious small blobs that survived morphological opening. Setting $A_{\min}$ appropriately requires knowing the expected minimum size of objects of interest in pixels, which depends on the resolution and the distance of objects from the camera.
 
 ---
 
@@ -319,13 +319,13 @@ This is the smallest upright rectangle enclosing all points of the contour. It i
 
 Two output videos are produced:
 
-**Foreground mask video** — the binary mask $M_t$ (grayscale, converted to BGR for the video writer) is saved directly. This gives a clear, unambiguous view of what the detector classifies as foreground at each frame.
+**Foreground mask** — the binary mask $M_t$ (grayscale, converted to BGR for the video writer) is saved directly. This gives a clear, unambiguous view of what the detector classifies as foreground at each frame.
 
-**Overlay video** — the original colour frame is blended with a green-channel highlight of the mask using a weighted sum:
+**Motion overlay** — the original colour frame is blended with a green-channel highlight of the mask using a weighted sum:
 
 $$I_{\text{overlay}} = \alpha_1 \cdot I_{\text{frame}} + \alpha_2 \cdot I_{\text{green}}$$
 
-with $\alpha_1 = 1.0$ and $\alpha_2 = 0.45$, where $I_{\text{green}}$ is a three-channel image that is zero everywhere except in the green channel, where it equals $M_t$. The bounding rectangle of each detected object is then drawn on top in red.
+with $\alpha_1 = 1.0$ and $\alpha_2 = 0.45$, where $I_{\text{green}}$ is a three-channel image that is zero everywhere except in the green channel, where it equals $M_t$. The axis-aligned bounding rectangle of each detected object is then drawn on top in red.
 
 ---
 
@@ -335,18 +335,18 @@ The table below summarises all user-facing parameters, their mathematical role, 
 
 | Parameter | Method(s) | Mathematical role | Tuning advice |
 |---|---|---|---|
-| **History** | MOG2, KNN | Temporal memory $H \approx 1/\alpha$; number of frames used to build the model | Increase for slow-changing backgrounds; decrease for fast changes |
-| **MOG2 variance threshold** $\lambda$ | MOG2 | Mahalanobis distance threshold for background classification | Increase to reduce false positives; decrease to improve sensitivity |
-| **KNN distance threshold** $d^2$ | KNN | Squared intensity distance for NN matching | Larger = less sensitive; smaller = more false positives from noise |
+| **History** | MOG2, KNN | Number of frames used to build the background model; effective memory $\approx H$ frames | Increase for slowly changing backgrounds; decrease for fast scene changes |
+| **MOG2 variance threshold** $\lambda$ | MOG2 | Mahalanobis distance threshold for background/foreground classification | Increase to reduce false positives; decrease to improve sensitivity |
+| **KNN distance threshold** $d^2$ | KNN | Squared intensity distance for nearest-neighbour matching | Larger = less sensitive; smaller = more false positives from noise |
 | **Detect shadows** | MOG2, KNN | Enables HSV-based shadow/foreground discrimination | Enable when object shadows cause oversized detections |
-| **Learning rate** $\alpha$ | MOG2, KNN, Running Avg | Weight of the current frame in background model update | High: fast adaptation but objects may vanish if still; Low: stable but slow to adapt |
-| **Difference threshold** $\tau$ | Frame Diff, Running Avg | Binarization threshold on the absolute difference image | Tune based on expected contrast of moving objects vs background |
-| **Blur kernel size** $k$ | All | Size of Gaussian pre-smoothing kernel (must be odd) | Increase for noisy videos; keep small to preserve fine motion detail |
-| **Opening kernel size** | All | Structuring element for erosion+dilation (noise removal) | Increase to eliminate small spurious detections |
-| **Closing kernel size** | All | Structuring element for dilation+erosion (gap filling) | Increase to obtain more solid, filled object masks |
-| **Minimum object area** $A_{min}$ | All | Connected component area filter threshold (pixels) | Set to the minimum expected object size in pixels |
+| **Learning rate** $\alpha$ | MOG2, KNN, Running Avg | Per-frame weight in the background model update; overrides the automatic $1/H$ rate for MOG2 and KNN | High: fast adaptation but stationary objects may vanish; Low: stable but slow to adapt |
+| **Difference threshold** $\tau$ | Frame Diff, Running Avg | Binarisation threshold on the absolute difference image | Tune based on expected contrast of moving objects versus background |
+| **Blur kernel size** $k$ | All | Size of the Gaussian pre-smoothing kernel applied to the BGR frame (must be odd) | Increase for noisy videos; keep small to preserve fine motion detail |
+| **Opening kernel size** | All | Structuring element size for erosion followed by dilation (noise removal) | Increase to eliminate small spurious detections |
+| **Closing kernel size** | All | Structuring element size for dilation followed by erosion (gap filling) | Increase to obtain more solid, filled object masks |
+| **Minimum object area** $A_{\min}$ | All | Connected component area filter threshold (pixels) | Set to the minimum expected object size in pixels |
 | **Maximum output dimension** | All | Rescaling of the video's largest dimension before processing | Reduce to accelerate processing on high-resolution videos |
-| **Box thickness** | All | Visual thickness of bounding rectangles in the overlay | Aesthetic only |
-| **Max frames** | All | Limits the number of processed frames | Reduce for quick previews |
+| **Bounding box thickness** | All | Visual thickness of axis-aligned bounding rectangles in the overlay | Aesthetic only |
+| **Max frames to process** | All | Limits the number of frames processed from the video | Reduce for quick previews |
 
 ---

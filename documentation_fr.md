@@ -43,9 +43,9 @@ Travailler en niveaux de gris réduit le coût de calcul d'un facteur 3 et est s
 
 ### 2.2 Flou gaussien
 
-Avant toute opération de différenciation, chaque image en niveaux de gris est convoluée par un **noyau gaussien** afin d'atténuer le bruit haute fréquence :
+Avant toute opération ultérieure, chaque image BGR est convoluée par un **noyau gaussien** afin d'atténuer le bruit haute fréquence :
 
-$$\tilde{G}_t = G_t * h_\sigma$$
+$$\tilde{I}_t = I_t * h_\sigma$$
 
 où le noyau gaussien 2D est donné par :
 
@@ -55,7 +55,7 @@ En pratique, on utilise un noyau discret de taille $(k \times k)$, avec $k$ impa
 
 **Pourquoi flouter ?** Le bruit du capteur et les artefacts de compression introduisent des pixels isolés qui scintillent d'une image à l'autre. Sans flou, ils produiraient des milliers de fausses détections de premier plan. Le flou échange une petite perte de résolution spatiale contre une amélioration très nette du rapport signal sur bruit dans l'image de différence.
 
-> **Important** : le flou gaussien est appliqué **uniquement dans les méthodes Frame Difference et Running Average**, où les différences pixel à pixel sont calculées manuellement. Les soustracteurs MOG2 et KNN gèrent eux-mêmes statistiquement une partie du bruit, mais le flou est également appliqué à l'image avant de la transmettre à ces méthodes, ce qui assure un prétraitement cohérent dans tous les modes.
+> **Note** : le flou gaussien est appliqué de manière uniforme à toutes les méthodes en tant que première étape de prétraitement. L'image BGR floutée est produite en premier, puis la conversion en niveaux de gris est appliquée sur le résultat lissé. Pour la différence entre images et la moyenne glissante, le flou atténue le scintillement des pixels entre deux images avant l'opération de différenciation. Pour MOG2 et KNN, l'image lissée est transmise directement au soustracteur de fond, assurant un débruitage cohérent quelle que soit la stratégie de détection.
 
 ---
 
@@ -146,7 +146,7 @@ où $w_{k,t}$ est le poids (coefficient de mélange) de la $k$-ième gaussienne 
 
 ### 6.2 Classification fond / premier plan
 
-Les $K$ composantes ne représentent pas toutes le fond. À chaque instant, les composantes sont triées selon le rapport $w_{k}/\sigma_{k}$, qui classe heuristiquement les composantes selon leur caractère "stable et fréquent" : une gaussienne étroite et fortement pondérée correspond à un état de fond stable et récurrent. Les premières $B$ composantes dont le poids cumulé dépasse un seuil représentent le fond :
+Les $K$ composantes ne représentent pas toutes le fond. À chaque instant, les composantes sont triées selon le rapport $w_{k}/\sigma_{k}$, qui classe heuristiquement les composantes selon leur caractère « stable et fréquent » : une gaussienne étroite et fortement pondérée correspond à un état de fond stable et récurrent. Les premières $B$ composantes dont le poids cumulé dépasse un seuil représentent le fond :
 
 $$B = \arg\min_b \left\{ \sum_{k=1}^{b} w_k > T_{bg} \right\}$$
 
@@ -168,7 +168,7 @@ $$\sigma_{k^*,t}^2 \leftarrow (1 - \rho)\, \sigma_{k^*,t}^2 + \rho\, (x_t - \mu_
 
 où $\rho = \alpha \cdot \mathcal{N}(x_t; \mu_{k^*}, \sigma_{k^*}^2)$ est un learning rate par composante, pondéré par la qualité de l'ajustement entre l'observation et la composante. Tous les autres poids diminuent selon : $w_{k \neq k^*} \leftarrow (1-\alpha)\, w_{k}$. Si aucune composante ne correspond, la composante la moins probable est remplacée par une nouvelle composante initialisée en $x_t$.
 
-Le **learning rate** $\alpha$ est équivalent à $1/H$ où $H$ est le paramètre **History**. Il contrôle donc le nombre d'images passées qui contribuent effectivement au modèle. Une valeur de 150 pour l'historique signifie que le modèle possède une mémoire temporelle d'environ 150 images.
+Le **learning rate** $\alpha$ contrôle la vitesse d'adaptation. Lorsqu'il est fixé manuellement à une valeur positive, il remplace le taux automatique $1/H$ qu'OpenCV déduirait du paramètre **History** $H$. Une valeur de 150 pour l'historique signifie que le modèle possède une mémoire temporelle d'environ 150 images en mode automatique.
 
 ### 6.4 Avantages de MOG2
 
@@ -196,7 +196,7 @@ Le **KNN distance threshold** $d^2$ est la distance euclidienne au carré dans l
 | Support multimodal | Oui ($K$ composantes) | Oui (implicitement, via la diversité des échantillons) |
 | Complexité par pixel | $O(K)$ | $O(N)$ |
 | Adaptation à de nouvelles distributions | Progressive par mise à jour des poids | Immédiate lors du remplacement d'un échantillon |
-| Paramètre principal | Variance threshold | Distance threshold $d^2$ |
+| Paramètre principal | Variance threshold $\lambda$ | Distance threshold $d^2$ |
 
 KNN tend à mieux fonctionner que MOG2 dans les scènes présentant une dynamique de fond très complexe et non gaussienne, par exemple les surfaces d'eau, les flammes ou les écrans, car il ne fait aucune hypothèse de distribution. MOG2 est généralement plus rapide pour de petites valeurs de $K$ et peut être plus stable numériquement.
 
@@ -214,9 +214,9 @@ MOG2 et KNN incluent tous deux une étape optionnelle de **détection des ombres
 
 La détection d'ombre utilise un modèle couleur simple mais efficace (Prati et al., 2003). Un pixel $(x,y)$ est classé comme **ombre** et non comme premier plan si :
 
-$$\alpha_{shadow} \leq \frac{I_t(x,y)}{B_t(x,y)} \leq \beta_{shadow} \qquad \text{and} \qquad \left|\arg(I_t) - \arg(B_t)\right| < \tau_{hue}$$
+$$\alpha_{s} \leq \frac{I_t(x,y)}{B_t(x,y)} \leq \beta_{s} \qquad \text{et} \qquad \left|\arg(I_t) - \arg(B_t)\right| < \tau_{h}$$
 
-où $\alpha_{shadow}$ et $\beta_{shadow}$ bornent le rapport acceptable entre l'intensité courante et l'intensité de fond, une ombre assombrit l'image mais ne modifie pas fortement la couleur, et où la différence angulaire dans le canal de teinte doit rester faible. Dans l'espace HSV, une ombre réduit principalement le canal $V$ tandis que le canal $H$ reste presque inchangé.
+où $\alpha_{s}$ et $\beta_{s}$ bornent le rapport acceptable entre l'intensité courante et l'intensité de fond (une ombre assombrit l'image mais ne modifie pas fortement la couleur), et où la différence angulaire dans le canal de teinte doit rester faible. Dans l'espace HSV, une ombre réduit principalement le canal $V$ (valeur) tandis que le canal $H$ (teinte) reste presque inchangé.
 
 ### 8.2 Encodage de sortie
 
@@ -247,11 +247,11 @@ Les deux opérations morphologiques élémentaires sont :
 
 **Érosion** — un pixel $(x,y)$ de l'image érodée vaut 1 seulement si *tous* les pixels du voisinage $\mathcal{B}$ centré en $(x,y)$ valent 1 dans le masque d'origine :
 
-$$(\text{Erosion: } M \ominus \mathcal{B})(x,y) = \min_{(u,v) \in \mathcal{B}} M(x+u, y+v)$$
+$$(\text{Érosion : } M \ominus \mathcal{B})(x,y) = \min_{(u,v) \in \mathcal{B}} M(x+u, y+v)$$
 
 **Dilatation** — un pixel $(x,y)$ de l'image dilatée vaut 1 si *au moins un* pixel du voisinage vaut 1 :
 
-$$(\text{Dilation: } M \oplus \mathcal{B})(x,y) = \max_{(u,v) \in \mathcal{B}} M(x+u, y+v)$$
+$$(\text{Dilatation : } M \oplus \mathcal{B})(x,y) = \max_{(u,v) \in \mathcal{B}} M(x+u, y+v)$$
 
 ### 9.3 Ouverture (suppression du bruit)
 
@@ -291,11 +291,11 @@ L'algorithme (Suzuki, 1985) attribue une étiquette entière unique $\ell$ à ch
 
 ### 10.2 Filtrage par aire
 
-Chaque composante n'est conservée que si son aire dépasse le seuil **minimum object area** $A_{min}$ :
+Chaque composante n'est conservée que si son aire dépasse le seuil **Minimum object area** $A_{\min}$ :
 
-$$M_t^{\text{filtered}}(x,y) = \mathbf{1}\!\left[\ell(x,y) \neq 0 \;\wedge\; A_{\ell(x,y)} \geq A_{min}\right]$$
+$$M_t^{\text{filtered}}(x,y) = \mathbf{1}\!\left[\ell(x,y) \neq 0 \;\wedge\; A_{\ell(x,y)} \geq A_{\min}\right]$$
 
-Cette étape élimine les petites taches parasites qui ont survécu à l'ouverture morphologique. Choisir correctement $A_{min}$ suppose de connaître la taille minimale attendue des objets d'intérêt en nombre de pixels, ce qui dépend de la résolution et de la distance des objets à la caméra.
+Cette étape élimine les petites taches parasites qui ont survécu à l'ouverture morphologique. Choisir correctement $A_{\min}$ suppose de connaître la taille minimale attendue des objets d'intérêt en nombre de pixels, ce qui dépend de la résolution et de la distance des objets à la caméra.
 
 ---
 
@@ -319,9 +319,9 @@ Il s'agit du plus petit rectangle droit contenant tous les points du contour. C'
 
 Deux vidéos de sortie sont produites :
 
-**Foreground mask video** — le masque binaire $M_t$, en niveaux de gris puis converti en BGR pour l'écriture vidéo, est sauvegardé directement. Cela donne une vue claire et non ambiguë de ce que le détecteur classe comme premier plan à chaque image.
+**Foreground mask** — le masque binaire $M_t$, en niveaux de gris puis converti en BGR pour l'écriture vidéo, est sauvegardé directement. Cela donne une vue claire et non ambiguë de ce que le détecteur classe comme premier plan à chaque image.
 
-**Overlay video** — l'image couleur d'origine est mélangée à une mise en évidence du masque sur le canal vert à l'aide d'une somme pondérée :
+**Motion overlay** — l'image couleur d'origine est mélangée à une mise en évidence du masque sur le canal vert à l'aide d'une somme pondérée :
 
 $$I_{\text{overlay}} = \alpha_1 \cdot I_{\text{frame}} + \alpha_2 \cdot I_{\text{green}}$$
 
@@ -335,18 +335,18 @@ Le tableau ci-dessous résume tous les paramètres visibles par l'utilisateur, l
 
 | Paramètre | Méthode(s) | Rôle mathématique | Conseil de réglage |
 |---|---|---|---|
-| **History** | MOG2, KNN | Mémoire temporelle $H \approx 1/\alpha$ ; nombre d'images utilisées pour construire le modèle | Augmenter pour des fonds évoluant lentement ; diminuer pour des changements rapides |
+| **History** | MOG2, KNN | Nombre d'images utilisées pour construire le modèle de fond ; mémoire effective $\approx H$ images | Augmenter pour des fonds évoluant lentement ; diminuer pour des changements rapides |
 | **MOG2 variance threshold** $\lambda$ | MOG2 | Seuil de distance de Mahalanobis pour la classification fond / premier plan | Augmenter pour réduire les faux positifs ; diminuer pour améliorer la sensibilité |
 | **KNN distance threshold** $d^2$ | KNN | Distance d'intensité au carré pour l'appariement par plus proches voisins | Plus grand = moins sensible ; plus petit = plus de faux positifs dus au bruit |
-| **Detect shadows** | MOG2, KNN | Active une discrimination ombre / premier plan basée sur HSV | À activer lorsque les ombres provoquent des détections trop grandes |
-| **Learning rate** $\alpha$ | MOG2, KNN, Running Avg | Poids de l'image courante dans la mise à jour du modèle de fond | Élevé : adaptation rapide mais disparition possible des objets immobiles ; faible : fond stable mais adaptation lente |
+| **Detect shadows** | MOG2, KNN | Active une discrimination ombre / premier plan basée sur l'espace HSV | À activer lorsque les ombres provoquent des détections trop grandes |
+| **Learning rate** $\alpha$ | MOG2, KNN, Running Avg | Poids de l'image courante dans la mise à jour du modèle ; remplace le taux automatique $1/H$ pour MOG2 et KNN | Élevé : adaptation rapide mais disparition possible des objets immobiles ; faible : fond stable mais adaptation lente |
 | **Difference threshold** $\tau$ | Frame Diff, Running Avg | Seuil de binarisation sur l'image de différence absolue | À ajuster selon le contraste attendu entre objets en mouvement et fond |
-| **Blur kernel size** $k$ | All | Taille du noyau gaussien de pré-lissage, doit être impaire | Augmenter pour des vidéos bruitées ; garder faible pour préserver les petits détails de mouvement |
-| **Opening kernel size** | All | Élément structurant pour érosion + dilatation, suppression du bruit | Augmenter pour éliminer les petites détections parasites |
-| **Closing kernel size** | All | Élément structurant pour dilatation + érosion, comblement des lacunes | Augmenter pour obtenir des masques d'objets plus pleins et compacts |
-| **Minimum object area** $A_{min}$ | All | Seuil de filtrage par aire des composantes connexes, en pixels | À fixer selon la taille minimale attendue des objets en pixels |
+| **Blur kernel size** $k$ | All | Taille du noyau gaussien appliqué à l'image BGR avant tout autre traitement, doit être impaire | Augmenter pour des vidéos bruitées ; garder faible pour préserver les petits détails de mouvement |
+| **Opening kernel size** | All | Taille de l'élément structurant pour érosion + dilatation (suppression du bruit) | Augmenter pour éliminer les petites détections parasites |
+| **Closing kernel size** | All | Taille de l'élément structurant pour dilatation + érosion (comblement des lacunes) | Augmenter pour obtenir des masques d'objets plus pleins et compacts |
+| **Minimum object area** $A_{\min}$ | All | Seuil de filtrage par aire des composantes connexes, en pixels | À fixer selon la taille minimale attendue des objets en pixels |
 | **Maximum output dimension** | All | Redimensionnement de la plus grande dimension de la vidéo avant traitement | À réduire pour accélérer le traitement des vidéos haute résolution |
-| **Box thickness** | All | Épaisseur visuelle des rectangles englobants dans la superposition | Purement esthétique |
-| **Max frames** | All | Limite le nombre d'images traitées | À réduire pour des aperçus rapides |
+| **Bounding box thickness** | All | Épaisseur visuelle des rectangles englobants dans la superposition | Purement esthétique |
+| **Max frames to process** | All | Limite le nombre d'images traitées | À réduire pour des aperçus rapides |
 
 ---

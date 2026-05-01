@@ -12,9 +12,6 @@ LATEX_DELIMITERS = [
     {"left": "$", "right": "$", "display": False},
 ]
 
-#DOCUMENTATION_fr = open("documentation_fr.md").read()
-#DOCUMENTATION_en = open("documentation_en.md").read()
-
 with open("documentation_fr.md", "r", encoding="utf-8") as f:
     DOCUMENTATION_fr = f.read()
 
@@ -238,11 +235,13 @@ def process_video(
         if (frame.shape[1], frame.shape[0]) != (output_width, output_height):
             frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
 
+        # Apply Gaussian blur to the BGR working frame first, consistently for all methods.
+        # Grayscale conversion is then applied to the already-smoothed frame.
         working = frame.copy()
-        gray = cv2.cvtColor(working, cv2.COLOR_BGR2GRAY)
-
         if blur_kernel > 1:
-            gray = cv2.GaussianBlur(gray, (blur_kernel, blur_kernel), 0)
+            working = cv2.GaussianBlur(working, (blur_kernel, blur_kernel), 0)
+
+        gray = cv2.cvtColor(working, cv2.COLOR_BGR2GRAY)
 
         if method in {"MOG2", "KNN"}:
             raw_mask = subtractor.apply(working, learningRate=learning_rate)
@@ -256,7 +255,7 @@ def process_video(
                 delta = cv2.absdiff(gray, previous_gray)
                 _, binary_mask = cv2.threshold(delta, diff_threshold, 255, cv2.THRESH_BINARY)
                 previous_gray = gray
-        else:
+        else:  # Running Average
             if running_background is None:
                 running_background = gray.astype(np.float32)
                 binary_mask = np.zeros_like(gray)
@@ -352,28 +351,28 @@ def run_wrapper(
     if method == "MOG2":
         history = history_mog2
         current_mog2_var_threshold = mog2_var_threshold
-        current_knn_dist2_threshold = 1
+        current_knn_dist2_threshold = 400
         detect_shadows = mog2_detect_shadows
         learning_rate = mog2_learning_rate
-        diff_threshold = 1
+        diff_threshold = 30
     elif method == "KNN":
         history = history_knn
-        current_mog2_var_threshold = 1
+        current_mog2_var_threshold = 16
         current_knn_dist2_threshold = knn_dist2_threshold
         detect_shadows = knn_detect_shadows
         learning_rate = knn_learning_rate
-        diff_threshold = 1
+        diff_threshold = 30
     elif method == "Frame Difference":
         history = 1
-        current_mog2_var_threshold = 1
-        current_knn_dist2_threshold = 1
+        current_mog2_var_threshold = 16
+        current_knn_dist2_threshold = 400
         detect_shadows = False
         learning_rate = 0.01
         diff_threshold = frame_diff_threshold
-    else:
+    else:  # Running Average
         history = 1
-        current_mog2_var_threshold = 1
-        current_knn_dist2_threshold = 1
+        current_mog2_var_threshold = 16
+        current_knn_dist2_threshold = 400
         detect_shadows = False
         learning_rate = running_avg_learning_rate
         diff_threshold = running_avg_threshold
@@ -396,6 +395,7 @@ def run_wrapper(
         max_frames=max_frames,
     )
 
+
 with gr.Blocks(title="Video Motion Detection") as demo:
     with gr.Tab("App"):
         with gr.Row():
@@ -417,8 +417,8 @@ with gr.Blocks(title="Video Motion Detection") as demo:
                     with gr.Group(visible=True) as mog2_group:
                         with gr.Row():
                             with gr.Column():
-                                history_mog2 = gr.Slider(1, 10000, value=150, step=1, label="History")
-                                mog2_var_threshold = gr.Slider(1, 10000, value=16, step=1, label="MOG2 variance threshold")
+                                history_mog2 = gr.Slider(1, 500, value=150, step=1, label="History")
+                                mog2_var_threshold = gr.Slider(4, 250, value=16, step=1, label="MOG2 variance threshold")
                             with gr.Column():
                                 mog2_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
                                 mog2_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
@@ -426,8 +426,8 @@ with gr.Blocks(title="Video Motion Detection") as demo:
                     with gr.Group(visible=False) as knn_group:
                         with gr.Row():
                             with gr.Column():
-                                history_knn = gr.Slider(1, 10000, value=150, step=1, label="History")
-                                knn_dist2_threshold = gr.Slider(1, 10000, value=400, step=1, label="KNN distance threshold")
+                                history_knn = gr.Slider(1, 500, value=150, step=1, label="History")
+                                knn_dist2_threshold = gr.Slider(10, 2000, value=400, step=10, label="KNN distance threshold")
                             with gr.Column():
                                 knn_detect_shadows = gr.Checkbox(value=False, label="Detect shadows")
                                 knn_learning_rate = gr.Slider(0.0001, 1.0, value=0.01, step=0.0001, label="Learning rate")
@@ -449,20 +449,20 @@ with gr.Blocks(title="Video Motion Detection") as demo:
 
                     with gr.Row():
                         with gr.Column():
-                            blur_kernel = gr.Slider(1, 101, value=5, step=1, label="Blur kernel size")
-                            open_kernel = gr.Slider(1, 101, value=3, step=1, label="Opening kernel size")
-                            close_kernel = gr.Slider(1, 101, value=7, step=1, label="Closing kernel size")
+                            blur_kernel = gr.Slider(1, 51, value=5, step=2, label="Blur kernel size")
+                            open_kernel = gr.Slider(1, 51, value=3, step=2, label="Opening kernel size")
+                            close_kernel = gr.Slider(1, 51, value=7, step=2, label="Closing kernel size")
                         with gr.Column():
                             min_area = gr.Slider(1, 10000, value=400, step=1, label="Minimum object area")
-                            max_dimension = gr.Slider(64, 10000, value=720, step=1, label="Maximum output dimension")
-                            contour_thickness = gr.Slider(1, 100, value=2, step=1, label="Box thickness")
+                            max_dimension = gr.Slider(64, 1920, value=720, step=1, label="Maximum output dimension")
+                            contour_thickness = gr.Slider(1, 10, value=2, step=1, label="Bounding box thickness")
                             max_frames = gr.Slider(1, 10000, value=10000, step=1, label="Max frames to process")
 
                 run_button = gr.Button("Process", variant="primary")
 
             with gr.Column(scale=1):
-                mask_video = gr.Video(label="Foreground mask video", height=360)
-                overlay_video = gr.Video(label="Detected motion video", height=360)
+                mask_video = gr.Video(label="Foreground mask", height=360)
+                overlay_video = gr.Video(label="Motion overlay", height=360)
 
         method.change(
             fn=update_method_visibility,
@@ -505,10 +505,10 @@ with gr.Blocks(title="Video Motion Detection") as demo:
                     btn = gr.Button(title)
                     doc_fr_buttons.append((btn, title))
 
-            with gr.Column(scale=3):
+            with gr.Column(scale=2):
                 doc_fr_view = gr.Markdown(
                     value=load_doc_fr_section(DOC_FR_TITLES[0]),
-                    latex_delimiters=LATEX_DELIMITERS
+                    latex_delimiters=LATEX_DELIMITERS,
                 )
 
         for btn, title in doc_fr_buttons:
@@ -526,10 +526,10 @@ with gr.Blocks(title="Video Motion Detection") as demo:
                     btn = gr.Button(title)
                     doc_en_buttons.append((btn, title))
 
-            with gr.Column(scale=3):
+            with gr.Column(scale=2):
                 doc_en_view = gr.Markdown(
                     value=load_doc_en_section(DOC_EN_TITLES[0]),
-                    latex_delimiters=LATEX_DELIMITERS
+                    latex_delimiters=LATEX_DELIMITERS,
                 )
 
         for btn, title in doc_en_buttons:
