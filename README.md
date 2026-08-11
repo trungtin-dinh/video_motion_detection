@@ -1,3 +1,4 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/trungtin-dinh/video_motion_detection)
 ---
 title: Video Motion Detection
 emoji: 🏃
